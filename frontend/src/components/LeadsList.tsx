@@ -2,8 +2,26 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FC, useState } from 'react'
 import toast from 'react-hot-toast'
 import { api } from '../api'
+import { EmailVerificationStatus } from '../api/types/leads/getMany'
 import { MessageTemplateModal } from './MessageTemplateModal'
 import { CsvImportModal } from './CsvImportModal'
+
+const EMAIL_STATUS_BADGE: Record<EmailVerificationStatus, { icon: string; title: string }> = {
+  pending: { icon: '⏳', title: 'Verification in progress' },
+  verified: { icon: '✅', title: 'Email verified' },
+  invalid: { icon: '❌', title: 'Email invalid' },
+  failed: { icon: '⚠️', title: 'Verification failed, try again' },
+}
+
+const EmailStatusBadge: FC<{ emailVerified: boolean | null; status: EmailVerificationStatus | null }> = ({
+  emailVerified,
+  status,
+}) => {
+  // Leads verified before the status column existed only have the boolean
+  const effective = status ?? (emailVerified === null ? null : emailVerified ? 'verified' : 'invalid')
+  const badge = effective ? EMAIL_STATUS_BADGE[effective] : { icon: '❓', title: 'Not verified yet' }
+  return <span title={badge.title}>{badge.icon}</span>
+}
 
 export const LeadsList: FC = () => {
   const [selectedLeads, setSelectedLeads] = useState<number[]>([])
@@ -16,6 +34,9 @@ export const LeadsList: FC = () => {
     queryKey: ['leads', 'getMany'],
     queryFn: async () => api.leads.getMany(),
     retry: false,
+    // Email verification runs in the background; poll until no lead is pending
+    refetchInterval: (query) =>
+      query.state.data?.some((lead) => lead.emailVerificationStatus === 'pending') ? 2000 : false,
   })
   
 
@@ -40,11 +61,13 @@ export const LeadsList: FC = () => {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['leads', 'getMany'] })
       setIsEnrichDropdownOpen(false)
-      toast.success(
-        data.verifiedCount === 1
-          ? `Verified ${data.verifiedCount} email`
-          : `Verified ${data.verifiedCount} emails`
-      )
+      const started = data.startedLeadIds.length
+      if (started > 0) {
+        toast.success(started === 1 ? 'Verifying 1 email…' : `Verifying ${started} emails…`)
+      }
+      if (data.errors.length > 0) {
+        toast.error(`Could not start verification for ${data.errors.map((e) => e.leadName).join(', ')}`)
+      }
     },
     onError: () => {
       toast.error('Failed to verify emails. Please try again.')
@@ -149,7 +172,8 @@ export const LeadsList: FC = () => {
                     </button>
                     <button
                       onClick={() => verifyEmailsMutation.mutate(selectedLeads)}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                      disabled={verifyEmailsMutation.isPending}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                       <div className="flex items-center">
                         <svg className="mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -264,7 +288,10 @@ export const LeadsList: FC = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{lead.email || '-'} {lead.emailVerified === null ? '❓' : lead.emailVerified ? '✅' : '❌'}</div>
+                    <div className="text-sm text-gray-900">
+                      {lead.email || '-'}{' '}
+                      <EmailStatusBadge emailVerified={lead.emailVerified} status={lead.emailVerificationStatus} />
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{lead.jobTitle || '-'}</div>

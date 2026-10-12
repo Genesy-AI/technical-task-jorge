@@ -1,10 +1,21 @@
-import { PrismaClient } from '@prisma/client'
 import express, { Request, Response } from 'express'
 import { Connection, Client } from '@temporalio/client'
+import { prisma } from './db'
 import { verifyEmailWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
 import { runTemporalWorker } from './worker'
-const prisma = new PrismaClient()
+
+let temporalClient: Promise<Client> | undefined
+function getTemporalClient(): Promise<Client> {
+  temporalClient ??= Connection.connect({ address: 'localhost:7233' })
+    .then((connection) => new Client({ connection, namespace: 'default' }))
+    .catch((err) => {
+      temporalClient = undefined // allow a later request to retry the connection
+      throw err
+    })
+  return temporalClient
+}
+
 const app = express()
 app.use(express.json())
 
@@ -273,40 +284,49 @@ app.post('/leads/verify-emails', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'No leads found with the provided IDs' })
     }
 
-    const connection = await Connection.connect({ address: 'localhost:7233' })
-    const client = new Client({ connection, namespace: 'default' })
+    const client = await getTemporalClient()
 
-    let verifiedCount = 0
-    const results: Array<{ leadId: number; emailVerified: boolean }> = []
-    const errors: Array<{ leadId: number; leadName: string; error: string }> = []
+    await prisma.lead.updateMany({
+      where: { id: { in: leads.map((lead) => lead.id) } },
+      data: { emailVerificationStatus: 'pending' },
+    })
 
-    for (const lead of leads) {
-      try {
-        const isVerified = await client.workflow.execute(verifyEmailWorkflow, {
+    // Fire-and-forget: the workflow persists its own result, the client polls GET /leads
+    const outcomes = await Promise.allSettled(
+      leads.map((lead) =>
+        client.workflow.start(verifyEmailWorkflow, {
           taskQueue: 'myQueue',
-          workflowId: `verify-email-${lead.id}-${Date.now()}`,
-          args: [lead.email],
+          // Stable id + USE_EXISTING: re-clicking while a check is running doesn't start a duplicate
+          workflowId: `verify-email-${lead.id}`,
+          workflowIdConflictPolicy: 'USE_EXISTING',
+          args: [lead.id, lead.email],
         })
+      )
+    )
 
-        await prisma.lead.update({
-          where: { id: lead.id },
-          data: { emailVerified: Boolean(isVerified) },
-        })
-
-        results.push({ leadId: lead.id, emailVerified: isVerified })
-        verifiedCount += 1
-      } catch (error) {
+    const startedLeadIds: number[] = []
+    const errors: Array<{ leadId: number; leadName: string; error: string }> = []
+    outcomes.forEach((outcome, i) => {
+      const lead = leads[i]
+      if (outcome.status === 'fulfilled') {
+        startedLeadIds.push(lead.id)
+      } else {
         errors.push({
           leadId: lead.id,
           leadName: `${lead.firstName} ${lead.lastName}`.trim(),
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: outcome.reason instanceof Error ? outcome.reason.message : 'Unknown error',
         })
       }
+    })
+
+    if (errors.length > 0) {
+      await prisma.lead.updateMany({
+        where: { id: { in: errors.map((e) => e.leadId) } },
+        data: { emailVerificationStatus: 'failed' },
+      })
     }
 
-    await connection.close()
-
-    res.json({ success: true, verifiedCount, results, errors })
+    res.status(202).json({ success: errors.length === 0, startedLeadIds, errors })
   } catch (error) {
     console.error('Error verifying emails:', error)
     res.status(500).json({ error: 'Failed to verify emails' })

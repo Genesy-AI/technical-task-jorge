@@ -19,4 +19,6 @@ model lead {
   companyName String?
   message     String?
   emailVerified Boolean?
+  // null = never checked, otherwise: pending | verified | invalid | failed
+  emailVerificationStatus String?
 }

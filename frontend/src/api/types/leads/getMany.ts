@@ -1,5 +1,7 @@
 export type LeadsGetManyInput = undefined
 
+export type EmailVerificationStatus = 'pending' | 'verified' | 'invalid' | 'failed'
+
 export type LeadsGetManyOutput = {
   id: number
   createdAt: string
@@ -12,4 +14,5 @@ export type LeadsGetManyOutput = {
   companyName: string | null
   message: string | null
   emailVerified: boolean | null
+  emailVerificationStatus: EmailVerificationStatus | null
 }[]
