@@ -3,6 +3,7 @@ import { Connection, Client } from '@temporalio/client'
 import { prisma } from './db'
 import { verifyEmailWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
+import { TEMPLATE_FIELDS } from './utils/templateFields'
 import { runTemporalWorker } from './worker'
 
 let temporalClient: Promise<Client> | undefined
@@ -117,6 +118,10 @@ app.delete('/leads', async (req: Request, res: Response) => {
   }
 })
 
+app.get('/templates/fields', (req: Request, res: Response) => {
+  res.json(TEMPLATE_FIELDS)
+})
+
 app.post('/leads/generate-messages', async (req: Request, res: Response) => {
   if (!req.body || typeof req.body !== 'object') {
     return res.status(400).json({ error: 'Request body is required and must be valid JSON' })
@@ -177,6 +182,14 @@ app.post('/leads/generate-messages', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to generate messages' })
   }
 })
+
+const optionalString = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim() ? value.trim() : null
+
+const optionalNonNegativeInt = (value: unknown): number | null => {
+  const n = typeof value === 'string' && value.trim() ? Number(value) : value
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : null
+}
 
 app.post('/leads/bulk', async (req: Request, res: Response) => {
   if (!req.body || typeof req.body !== 'object') {
@@ -240,6 +253,9 @@ app.post('/leads/bulk', async (req: Request, res: Response) => {
             jobTitle: lead.jobTitle ? lead.jobTitle.trim() : null,
             countryCode: lead.countryCode ? lead.countryCode.trim() : null,
             companyName: lead.companyName ? lead.companyName.trim() : null,
+            phoneNumber: optionalString(lead.phoneNumber),
+            yearsAtCompany: optionalNonNegativeInt(lead.yearsAtCompany),
+            linkedinUrl: optionalString(lead.linkedinUrl),
           },
         })
         importedCount++

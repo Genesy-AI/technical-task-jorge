@@ -206,4 +206,31 @@ describe('generateMessageFromTemplate', () => {
       expect(result).toBe('Hi John 😊 from TechCorp 🚀!')
     })
   })
+
+  describe('extended lead fields', () => {
+    const extendedLead: Lead = {
+      firstName: 'Ana',
+      companyName: 'Acme',
+      phoneNumber: '+34 600 111 222',
+      yearsAtCompany: 4,
+      linkedinUrl: 'https://www.linkedin.com/in/ana',
+    }
+
+    it('should replace phone, LinkedIn and numeric years fields', () => {
+      const template = '{firstName}, {yearsAtCompany} years at {companyName}! Call {phoneNumber} / {linkedinUrl}'
+      expect(generateMessageFromTemplate(template, extendedLead)).toBe(
+        'Ana, 4 years at Acme! Call +34 600 111 222 / https://www.linkedin.com/in/ana'
+      )
+    })
+
+    it('should treat 0 years as a valid value', () => {
+      expect(generateMessageFromTemplate('{yearsAtCompany}', { firstName: 'Ana', yearsAtCompany: 0 })).toBe('0')
+    })
+
+    it('should throw for missing extended fields', () => {
+      expect(() => generateMessageFromTemplate('{phoneNumber}', { firstName: 'Ana', phoneNumber: null })).toThrow(
+        'Missing required field: phoneNumber'
+      )
+    })
+  })
 })

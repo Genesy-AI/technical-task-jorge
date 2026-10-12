@@ -18,6 +18,9 @@ model lead {
   countryCode String?
   companyName String?
   message     String?
+  phoneNumber String?
+  yearsAtCompany Int?
+  linkedinUrl String?
   emailVerified Boolean?
   // null = never checked, otherwise: pending | verified | invalid | failed
   emailVerificationStatus String?

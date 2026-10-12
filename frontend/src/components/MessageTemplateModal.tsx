@@ -1,8 +1,9 @@
-import { FC, useState, useEffect, useCallback, useRef } from 'react'
+import { FC, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api } from '../api'
+import { TemplateEditor } from './TemplateEditor'
 
 interface MessageTemplateModalProps {
   isOpen: boolean
@@ -25,6 +26,24 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
   } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
+
+  const templateFields = useQuery({
+    queryKey: ['templates', 'fields'],
+    queryFn: async () => api.templates.fields(),
+    staleTime: Infinity,
+    enabled: isOpen,
+  })
+
+  // Shares the cache with LeadsList, so no extra request
+  const leads = useQuery({
+    queryKey: ['leads', 'getMany'],
+    queryFn: async () => api.leads.getMany(),
+    enabled: isOpen,
+  })
+  const selectedLeads = useMemo(
+    () => (leads.data ?? []).filter((lead) => selectedLeadIds.includes(lead.id)),
+    [leads.data, selectedLeadIds]
+  )
 
   const generateMessagesMutation = useMutation({
     mutationFn: async (data: { leadIds: number[]; template: string }) => api.leads.generateMessages(data),
@@ -106,23 +125,6 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
     }
   }, [isOpen, handleClose])
 
-  const availableFields = ['firstName', 'lastName', 'email', 'jobTitle', 'companyName', 'countryCode']
-
-  const insertField = (field: string) => {
-    if (textareaRef.current) {
-      const textarea = textareaRef.current
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const newTemplate = template.substring(0, start) + `{${field}}` + template.substring(end)
-      setTemplate(newTemplate)
-
-      setTimeout(() => {
-        textarea.focus()
-        textarea.setSelectionRange(start + field.length + 2, start + field.length + 2)
-      }, 0)
-    }
-  }
-
   if (!isOpen) return null
 
   const modalContent = (
@@ -131,7 +133,7 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
       onClick={handleBackdropClick}
     >
       <div
-        className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6">
@@ -155,34 +157,20 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
               <label htmlFor="message-template" className="block text-sm font-medium text-gray-700 mb-2">
                 Message Template
               </label>
-              <div className="space-y-3">
-                <div className="flex flex-wrap gap-2">
-                  <span className="text-sm text-gray-600">Insert field:</span>
-                  {availableFields.map((field) => (
-                    <button
-                      key={field}
-                      type="button"
-                      onClick={() => insertField(field)}
-                      className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded hover:bg-blue-200 transition-colors"
-                    >
-                      {`{${field}}`}
-                    </button>
-                  ))}
-                </div>
-                <textarea
-                  ref={textareaRef}
-                  id="message-template"
+              {templateFields.isError ? (
+                <p className="text-sm text-red-600">Could not load template fields. Please reopen the dialog.</p>
+              ) : (
+                <TemplateEditor
                   value={template}
-                  onChange={(e) => setTemplate(e.target.value)}
-                  placeholder="Enter your message template here. Use {fieldName} to insert dynamic values.&#10;&#10;Example: Hi {firstName}, I noticed you work at {companyName} as a {jobTitle}. Would you be interested in..."
-                  className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-                  required
+                  onChange={setTemplate}
+                  textareaRef={textareaRef}
+                  fields={templateFields.data ?? []}
+                  leads={selectedLeads}
                 />
-              </div>
+              )}
               <p className="mt-2 text-sm text-gray-500">
-                Use curly braces around field names (e.g., {`{firstName}`}) to insert dynamic values. If a
-                field is missing for a lead, an error will be shown and no message will be generated for that
-                lead.
+                Type <code>{'{'}</code> or pick a field on the right to insert dynamic values. If a field is
+                missing for a lead, no message will be generated for that lead.
               </p>
             </div>
 

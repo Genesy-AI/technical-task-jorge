@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseCsv, isValidEmail } from './csvParser'
+import { parseCsv, isValidEmail, isValidPhoneNumber, normalizeLinkedinUrl } from './csvParser'
 
 describe('isValidEmail', () => {
   it('should return true for valid email addresses', () => {
@@ -222,5 +222,77 @@ Jane,Johnson,jane@example.com`
     expect(result[0].lastName).toBe('Doe')
     expect(result[0].email).toBe('john@example.com')
     expect(result[0].isValid).toBe(true)
+  })
+})
+
+describe('isValidPhoneNumber', () => {
+  it('should accept common formats, including extensions', () => {
+    expect(isValidPhoneNumber('+1-280-754-0462x2154')).toBe(true)
+    expect(isValidPhoneNumber('(731)123-9702')).toBe(true)
+    expect(isValidPhoneNumber('063.430.8860x4762')).toBe(true)
+    expect(isValidPhoneNumber('+34 600 111 222')).toBe(true)
+    expect(isValidPhoneNumber('7549075690')).toBe(true)
+    expect(isValidPhoneNumber('555-1234 ext. 12')).toBe(true)
+  })
+
+  it('should reject text and too-short numbers', () => {
+    expect(isValidPhoneNumber('call me')).toBe(false)
+    expect(isValidPhoneNumber('12345')).toBe(false)
+    expect(isValidPhoneNumber('123x4567890')).toBe(false)
+  })
+})
+
+describe('normalizeLinkedinUrl', () => {
+  it('should normalize profile URLs to https', () => {
+    expect(normalizeLinkedinUrl('https://www.linkedin.com/in/jane-doe')).toBe('https://www.linkedin.com/in/jane-doe')
+    expect(normalizeLinkedinUrl('linkedin.com/in/jane-doe')).toBe('https://linkedin.com/in/jane-doe')
+    expect(normalizeLinkedinUrl('http://es.linkedin.com/in/jane')).toBe('https://es.linkedin.com/in/jane')
+  })
+
+  it('should reject non-profile and non-LinkedIn URLs', () => {
+    expect(normalizeLinkedinUrl('https://www.linkedin.com/company/acme')).toBeNull()
+    expect(normalizeLinkedinUrl('https://linkedin.com.evil.com/in/jane')).toBeNull()
+    expect(normalizeLinkedinUrl('https://twitter.com/in/jane')).toBeNull()
+    expect(normalizeLinkedinUrl('not a url')).toBeNull()
+  })
+})
+
+describe('parseCsv new lead fields', () => {
+  it('should parse phone, years (yearsInRole alias) and LinkedIn', () => {
+    const csv = `firstName,lastName,email,yearsInRole,phoneNumber,linkedinUrl
+Jane,Doe,jane@example.com,5,+1-280-754-0462x2154,linkedin.com/in/janedoe`
+
+    const [lead] = parseCsv(csv)
+
+    expect(lead.isValid).toBe(true)
+    expect(lead.yearsAtCompany).toBe(5)
+    expect(lead.phoneNumber).toBe('+1-280-754-0462x2154')
+    expect(lead.linkedinUrl).toBe('https://linkedin.com/in/janedoe')
+  })
+
+  it('should accept the yearsAtCompany header and 0 years', () => {
+    const [lead] = parseCsv(`firstName,lastName,email,Years At Company
+Jane,Doe,jane@example.com,0`)
+    expect(lead.yearsAtCompany).toBe(0)
+  })
+
+  it('should leave empty optional fields undefined', () => {
+    const [lead] = parseCsv(`firstName,lastName,email,yearsInRole,phoneNumber,linkedinUrl
+Jane,Doe,jane@example.com,,,`)
+    expect(lead.isValid).toBe(true)
+    expect(lead.yearsAtCompany).toBeUndefined()
+    expect(lead.phoneNumber).toBeUndefined()
+    expect(lead.linkedinUrl).toBeUndefined()
+  })
+
+  it('should flag invalid values in the new fields', () => {
+    const [lead] = parseCsv(`firstName,lastName,email,yearsInRole,phoneNumber,linkedinUrl
+Jane,Doe,jane@example.com,two,call me,https://twitter.com/jane`)
+    expect(lead.isValid).toBe(false)
+    expect(lead.errors).toEqual([
+      'Years at company must be a whole number between 0 and 80',
+      'Invalid phone number',
+      'Invalid LinkedIn profile URL',
+    ])
   })
 })
