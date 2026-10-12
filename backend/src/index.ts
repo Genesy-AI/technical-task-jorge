@@ -1,7 +1,9 @@
+import './env'
 import express, { Request, Response } from 'express'
 import { Connection, Client } from '@temporalio/client'
+import { lead as Lead } from '@prisma/client'
 import { prisma } from './db'
-import { verifyEmailWorkflow } from './workflows'
+import { enrichPhoneWorkflow, verifyEmailWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
 import { TEMPLATE_FIELDS } from './utils/templateFields'
 import { runTemporalWorker } from './worker'
@@ -15,6 +17,33 @@ function getTemporalClient(): Promise<Client> {
       throw err
     })
   return temporalClient
+}
+
+type LeadWorkflowErrors = Array<{ leadId: number; leadName: string; error: string }>
+
+// Fire-and-forget start of one workflow per lead; per-lead start failures are collected instead of thrown
+async function startLeadWorkflows(
+  leads: Lead[],
+  start: (client: Client, lead: Lead) => Promise<unknown>
+): Promise<{ startedLeadIds: number[]; errors: LeadWorkflowErrors }> {
+  const client = await getTemporalClient()
+  const outcomes = await Promise.allSettled(leads.map((lead) => start(client, lead)))
+
+  const startedLeadIds: number[] = []
+  const errors: LeadWorkflowErrors = []
+  outcomes.forEach((outcome, i) => {
+    const lead = leads[i]
+    if (outcome.status === 'fulfilled') {
+      startedLeadIds.push(lead.id)
+    } else {
+      errors.push({
+        leadId: lead.id,
+        leadName: `${lead.firstName} ${lead.lastName}`.trim(),
+        error: outcome.reason instanceof Error ? outcome.reason.message : 'Unknown error',
+      })
+    }
+  })
+  return { startedLeadIds, errors }
 }
 
 const app = express()
@@ -300,7 +329,8 @@ app.post('/leads/verify-emails', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'No leads found with the provided IDs' })
     }
 
-    const client = await getTemporalClient()
+    // Fail fast if Temporal is unreachable, before marking anything as pending
+    await getTemporalClient()
 
     await prisma.lead.updateMany({
       where: { id: { in: leads.map((lead) => lead.id) } },
@@ -308,32 +338,15 @@ app.post('/leads/verify-emails', async (req: Request, res: Response) => {
     })
 
     // Fire-and-forget: the workflow persists its own result, the client polls GET /leads
-    const outcomes = await Promise.allSettled(
-      leads.map((lead) =>
-        client.workflow.start(verifyEmailWorkflow, {
-          taskQueue: 'myQueue',
-          // Stable id + USE_EXISTING: re-clicking while a check is running doesn't start a duplicate
-          workflowId: `verify-email-${lead.id}`,
-          workflowIdConflictPolicy: 'USE_EXISTING',
-          args: [lead.id, lead.email],
-        })
-      )
+    const { startedLeadIds, errors } = await startLeadWorkflows(leads, (client, lead) =>
+      client.workflow.start(verifyEmailWorkflow, {
+        taskQueue: 'myQueue',
+        // Stable id + USE_EXISTING: re-clicking while a check is running doesn't start a duplicate
+        workflowId: `verify-email-${lead.id}`,
+        workflowIdConflictPolicy: 'USE_EXISTING',
+        args: [lead.id, lead.email],
+      })
     )
-
-    const startedLeadIds: number[] = []
-    const errors: Array<{ leadId: number; leadName: string; error: string }> = []
-    outcomes.forEach((outcome, i) => {
-      const lead = leads[i]
-      if (outcome.status === 'fulfilled') {
-        startedLeadIds.push(lead.id)
-      } else {
-        errors.push({
-          leadId: lead.id,
-          leadName: `${lead.firstName} ${lead.lastName}`.trim(),
-          error: outcome.reason instanceof Error ? outcome.reason.message : 'Unknown error',
-        })
-      }
-    })
 
     if (errors.length > 0) {
       await prisma.lead.updateMany({
@@ -346,6 +359,67 @@ app.post('/leads/verify-emails', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error verifying emails:', error)
     res.status(500).json({ error: 'Failed to verify emails' })
+  }
+})
+
+app.post('/leads/enrich-phones', async (req: Request, res: Response) => {
+  if (!req.body || typeof req.body !== 'object') {
+    return res.status(400).json({ error: 'Request body is required and must be valid JSON' })
+  }
+
+  const { leadIds, overwrite } = req.body as { leadIds?: number[]; overwrite?: boolean }
+
+  if (!Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({ error: 'leadIds must be a non-empty array' })
+  }
+
+  try {
+    const leads = await prisma.lead.findMany({
+      where: { id: { in: leadIds.map((id) => Number(id)) } },
+    })
+
+    if (leads.length === 0) {
+      return res.status(404).json({ error: 'No leads found with the provided IDs' })
+    }
+
+    // Provider lookups cost money: by default don't re-enrich leads that already have a phone
+    const toEnrich = overwrite === true ? leads : leads.filter((lead) => !lead.phoneNumber)
+    const skippedLeadIds = leads.filter((lead) => !toEnrich.includes(lead)).map((lead) => lead.id)
+
+    if (toEnrich.length === 0) {
+      return res.status(202).json({ success: true, startedLeadIds: [], skippedLeadIds, errors: [] })
+    }
+
+    // Fail fast if Temporal is unreachable, before marking anything as pending
+    await getTemporalClient()
+
+    await prisma.lead.updateMany({
+      where: { id: { in: toEnrich.map((lead) => lead.id) } },
+      data: { phoneEnrichmentStatus: 'pending', phoneEnrichmentProvider: null },
+    })
+
+    const { startedLeadIds, errors } = await startLeadWorkflows(toEnrich, (client, lead) =>
+      client.workflow.start(enrichPhoneWorkflow, {
+        taskQueue: 'myQueue',
+        // One enrichment per lead: a second click while one is running attaches to it.
+        // Once it has finished, the same id can be started again (default reuse policy) to retry.
+        workflowId: `enrich-phone-${lead.id}`,
+        workflowIdConflictPolicy: 'USE_EXISTING',
+        args: [lead.id],
+      })
+    )
+
+    if (errors.length > 0) {
+      await prisma.lead.updateMany({
+        where: { id: { in: errors.map((e) => e.leadId) } },
+        data: { phoneEnrichmentStatus: 'failed', phoneEnrichmentProvider: null },
+      })
+    }
+
+    res.status(202).json({ success: errors.length === 0, startedLeadIds, skippedLeadIds, errors })
+  } catch (error) {
+    console.error('Error enriching phones:', error)
+    res.status(500).json({ error: 'Failed to enrich phones' })
   }
 })
 

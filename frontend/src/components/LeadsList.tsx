@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FC, useState } from 'react'
 import toast from 'react-hot-toast'
 import { api } from '../api'
-import { EmailVerificationStatus } from '../api/types/leads/getMany'
+import { EmailVerificationStatus, LeadsGetManyOutput, PhoneProviderId } from '../api/types/leads/getMany'
 import { MessageTemplateModal } from './MessageTemplateModal'
 import { CsvImportModal } from './CsvImportModal'
 
@@ -23,6 +23,37 @@ const EmailStatusBadge: FC<{ emailVerified: boolean | null; status: EmailVerific
   return <span title={badge.title}>{badge.icon}</span>
 }
 
+const PHONE_PROVIDER_NAMES: Record<PhoneProviderId, string> = {
+  orionConnect: 'Orion Connect',
+  astraDialer: 'Astra Dialer',
+  nimbusLookup: 'Nimbus Lookup',
+}
+
+const PhoneCell: FC<{ lead: LeadsGetManyOutput[number] }> = ({ lead }) => {
+  const provider = lead.phoneEnrichmentProvider ? PHONE_PROVIDER_NAMES[lead.phoneEnrichmentProvider] : null
+  let status: { text: string; className: string } | null = null
+  switch (lead.phoneEnrichmentStatus) {
+    case 'pending':
+      status = { text: provider ? `Searching ${provider}…` : 'Queued…', className: 'text-blue-600 animate-pulse' }
+      break
+    case 'found':
+      status = provider ? { text: `via ${provider}`, className: 'text-gray-500' } : null
+      break
+    case 'not_found':
+      status = { text: 'No data found', className: 'text-gray-500' }
+      break
+    case 'failed':
+      status = { text: 'Lookup failed, try again', className: 'text-amber-600' }
+      break
+  }
+  return (
+    <div className="text-sm text-gray-900">
+      {lead.phoneNumber || '-'}
+      {status && <div className={`text-xs ${status.className}`}>{status.text}</div>}
+    </div>
+  )
+}
+
 export const LeadsList: FC = () => {
   const [selectedLeads, setSelectedLeads] = useState<number[]>([])
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false)
@@ -34,9 +65,13 @@ export const LeadsList: FC = () => {
     queryKey: ['leads', 'getMany'],
     queryFn: async () => api.leads.getMany(),
     retry: false,
-    // Email verification runs in the background; poll until no lead is pending
+    // Email verification and phone enrichment run in the background; poll until no lead is pending
     refetchInterval: (query) =>
-      query.state.data?.some((lead) => lead.emailVerificationStatus === 'pending') ? 2000 : false,
+      query.state.data?.some(
+        (lead) => lead.emailVerificationStatus === 'pending' || lead.phoneEnrichmentStatus === 'pending'
+      )
+        ? 2000
+        : false,
   })
   
 
@@ -73,6 +108,34 @@ export const LeadsList: FC = () => {
       toast.error('Failed to verify emails. Please try again.')
     }
   })
+
+  const enrichPhonesMutation = useMutation({
+    mutationFn: async ({ ids, overwrite }: { ids: number[]; overwrite: boolean }) =>
+      api.leads.enrichPhones({ leadIds: ids, overwrite }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['leads', 'getMany'] })
+      setIsEnrichDropdownOpen(false)
+      const started = data.startedLeadIds.length
+      const skipped = data.skippedLeadIds.length
+      if (started > 0) {
+        toast.success(started === 1 ? 'Looking up 1 phone number…' : `Looking up ${started} phone numbers…`)
+      }
+      if (skipped > 0 && started === 0 && data.errors.length === 0) {
+        toast(skipped === 1 ? 'The selected lead already has a phone' : 'All selected leads already have a phone')
+      }
+      if (data.errors.length > 0) {
+        toast.error(`Could not start phone lookup for ${data.errors.map((e) => e.leadName).join(', ')}`)
+      }
+    },
+    onError: () => {
+      toast.error('Failed to enrich phones. Please try again.')
+    }
+  })
+
+  const selectedWithoutPhone = leads.data?.filter(
+    (lead) => selectedLeads.includes(lead.id) && !lead.phoneNumber
+  ).length ?? 0
+  const selectedWithPhone = selectedLeads.length - selectedWithoutPhone
 
   const handleSelectAll = (checked: boolean) => {
     if (checked && leads.data) {
@@ -182,6 +245,34 @@ export const LeadsList: FC = () => {
                         Verify Email
                       </div>
                     </button>
+                    <button
+                      onClick={() => enrichPhonesMutation.mutate({ ids: selectedLeads, overwrite: false })}
+                      disabled={enrichPhonesMutation.isPending || selectedWithoutPhone === 0}
+                      title={selectedWithoutPhone === 0 ? 'All selected leads already have a phone' : undefined}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <div className="flex items-center">
+                        <svg className="mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                        </svg>
+                        <div>
+                          Enrich Phone
+                          {selectedWithPhone > 0 && (
+                            <div className="text-xs text-gray-500">{selectedWithoutPhone} missing a phone</div>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                    {selectedWithPhone > 0 && (
+                      <button
+                        onClick={() => enrichPhonesMutation.mutate({ ids: selectedLeads, overwrite: true })}
+                        disabled={enrichPhonesMutation.isPending}
+                        title="Look up all selected leads again and replace their phone when a provider finds one"
+                        className="block w-full text-left pl-11 pr-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Re-enrich all ({selectedLeads.length})
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         toast.error('Gender guessing feature is not yet implemented')
@@ -312,7 +403,7 @@ export const LeadsList: FC = () => {
                     <div className="text-sm text-gray-900">{lead.countryCode || '-'}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{lead.phoneNumber || '-'}</div>
+                    <PhoneCell lead={lead} />
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{lead.yearsAtCompany ?? '-'}</div>
