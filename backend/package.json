@@ -9,11 +9,15 @@
     "build": "tsc -p .",
     "format": "prettier --write .",
     "gen:prisma": "prisma generate",
-    "migrate:dev": "prisma migrate dev",
+    "migrate:dev": "prisma migrate dev --skip-seed && prisma db seed",
+    "db:seed": "prisma db seed",
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
