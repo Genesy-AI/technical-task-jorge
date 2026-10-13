@@ -89,7 +89,7 @@ app.get('/leads/:id', async (req: Request, res: Response) => {
   res.json(lead)
 })
 
-app.get('/leads', async (req: Request, res: Response) => {
+app.get('/leads', async (_req: Request, res: Response) => {
   const leads = await prisma.lead.findMany()
 
   res.json(leads)
@@ -147,7 +147,7 @@ app.delete('/leads', async (req: Request, res: Response) => {
   }
 })
 
-app.get('/templates/fields', (req: Request, res: Response) => {
+app.get('/templates/fields', (_req: Request, res: Response) => {
   res.json(TEMPLATE_FIELDS)
 })
 
