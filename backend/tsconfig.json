@@ -2,10 +2,9 @@
   "compilerOptions": {
     "target": "es6",
 
-    "module": "commonjs",
+    "module": "node16",
     "rootDir": "./src",
-    "moduleResolution": "node",
-    "baseUrl": "./",
+    "moduleResolution": "node16",
 
     "outDir": "./dist",
 
@@ -16,5 +15,5 @@
 
     "skipLibCheck": true
   },
-  "exclude": ["vitest.config.ts"]
+  "include": ["src"]
 }

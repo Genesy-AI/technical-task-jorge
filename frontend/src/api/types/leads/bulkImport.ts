@@ -6,6 +6,9 @@ export interface LeadsBulkImportInput {
     jobTitle?: string
     countryCode?: string
     companyName?: string
+    phoneNumber?: string
+    yearsAtCompany?: number
+    linkedinUrl?: string
   }[]
 }
 

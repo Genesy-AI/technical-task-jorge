@@ -18,5 +18,14 @@ model lead {
   countryCode String?
   companyName String?
   message     String?
+  phoneNumber String?
+  yearsAtCompany Int?
+  linkedinUrl String?
   emailVerified Boolean?
+  // null = never checked, otherwise: pending | verified | invalid | failed
+  emailVerificationStatus String?
+  // null = never enriched, otherwise: pending | found | not_found | failed
+  phoneEnrichmentStatus String?
+  // Provider currently being queried while pending, or the one that found the phone
+  phoneEnrichmentProvider String?
 }

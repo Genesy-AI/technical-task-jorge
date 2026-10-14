@@ -7,6 +7,9 @@ export interface CsvLead {
   jobTitle?: string
   countryCode?: string
   companyName?: string
+  phoneNumber?: string
+  yearsAtCompany?: number
+  linkedinUrl?: string
   isValid: boolean
   errors: string[]
   rowIndex: number
@@ -15,6 +18,31 @@ export interface CsvLead {
 export const isValidEmail = (email: string): boolean => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   return emailRegex.test(email)
+}
+
+// Digits with common separators, optional leading +, optional extension (x123 / ext. 123)
+const PHONE_REGEX = /^\+?[\d\s().-]+(\s*(x|ext\.?)\s*\d+)?$/i
+const MIN_PHONE_DIGITS = 7
+const MAX_YEARS_AT_COMPANY = 80
+
+export const isValidPhoneNumber = (phone: string): boolean => {
+  if (!PHONE_REGEX.test(phone)) return false
+  const mainPart = phone.split(/x|ext/i)[0]
+  return mainPart.replace(/\D/g, '').length >= MIN_PHONE_DIGITS
+}
+
+/** Returns a canonical https URL for a LinkedIn profile, or null if it isn't one. */
+export const normalizeLinkedinUrl = (value: string): string | null => {
+  const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`
+  try {
+    const url = new URL(withProtocol)
+    const isLinkedinHost = url.hostname === 'linkedin.com' || url.hostname.endsWith('.linkedin.com')
+    if (!isLinkedinHost || !/^\/in\/[^/]+/.test(url.pathname)) return null
+    url.protocol = 'https:'
+    return url.toString()
+  } catch {
+    return null
+  }
 }
 
 export const parseCsv = (content: string): CsvLead[] => {
@@ -49,6 +77,7 @@ export const parseCsv = (content: string): CsvLead[] => {
     if (Object.values(row).every((value) => !value)) return
 
     const lead: Partial<CsvLead> = { rowIndex: index + 2 }
+    const errors: string[] = []
 
     Object.entries(row).forEach(([header, value]) => {
       const normalizedHeader = header.toLowerCase().replace(/[^a-z]/g, '')
@@ -73,10 +102,35 @@ export const parseCsv = (content: string): CsvLead[] => {
         case 'companyname':
           lead.companyName = trimmedValue || undefined
           break
+        case 'phonenumber':
+        case 'phone':
+          if (!trimmedValue) break
+          if (isValidPhoneNumber(trimmedValue)) lead.phoneNumber = trimmedValue
+          else errors.push('Invalid phone number')
+          break
+        case 'yearsatcompany':
+        case 'yearsatcurrentcompany':
+        case 'yearsinrole':
+          if (!trimmedValue) break
+          if (/^\d+$/.test(trimmedValue) && Number(trimmedValue) <= MAX_YEARS_AT_COMPANY) {
+            lead.yearsAtCompany = Number(trimmedValue)
+          } else {
+            errors.push(`Years at company must be a whole number between 0 and ${MAX_YEARS_AT_COMPANY}`)
+          }
+          break
+        case 'linkedinurl':
+        case 'linkedin':
+        case 'linkedinprofile':
+        case 'linkedinprofileurl': {
+          if (!trimmedValue) break
+          const linkedinUrl = normalizeLinkedinUrl(trimmedValue)
+          if (linkedinUrl) lead.linkedinUrl = linkedinUrl
+          else errors.push('Invalid LinkedIn profile URL')
+          break
+        }
       }
     })
 
-    const errors: string[] = []
     if (!lead.firstName?.trim()) {
       errors.push('First name is required')
     }

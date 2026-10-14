@@ -1,0 +1,13 @@
+firstName,lastName,email,jobTitle,countryCode,companyName,yearsInRole,phoneNumber,linkedinUrl
+Marta,Ortega,marta.ortega@example.com,Head of Sales,ES,Global Tech Solutions,4,+34 612 345 678,https://www.linkedin.com/in/marta-ortega
+Lucas,Bernard,lucas.bernard@example.com,"Engineer, software",FR,Innovative Marketing Inc.,7,+33 6 12 34 56 78,linkedin.com/in/lucasbernard
+Hannah,Schmidt,hannah.schmidt@example.com,Product Manager,DE,Peak Performance Ltd.,0,(731)123-9702,http://de.linkedin.com/in/hannah-schmidt
+Kenji,Watanabe,kenji.watanabe@example.com,CTO,JP,Visionary Designs,12,+1-280-754-0462x2154,www.linkedin.com/in/kenji-watanabe/
+Priya,Patel,priya.patel@example.com,Marketing Director,IN,Creative Visionaries,3,063.430.8860x4762,https://linkedin.com/in/priyapatel
+Oliver,Hughes,oliver.hughes@example.com,Account Executive,GB,Advanced Tech Group,1,7549075690,https://uk.linkedin.com/in/oliver-hughes
+Sofia,Rossi,sofia.rossi@example.com,Operations Lead,IT,Pioneer Marketing,,,
+Noah,Fischer,noah.fischer@example.com,Data Analyst,AT,NextGen Innovators,2,+43 660 1234567,
+Camila,Souza,camila.souza@example.com,Customer Success,BR,Creative Tech,three,+55 11 91234-5678,https://www.linkedin.com/in/camila-souza
+Liam,O'Connor,liam.oconnor@example.com,Recruiter,IE,Elite Marketing Group,5,N/A,https://www.linkedin.com/in/liam-oconnor
+Eva,Novak,eva.novak@example.com,Finance Manager,CZ,Rogers Inc,6,+420 601 234 567,https://www.linkedin.com/company/rogers-inc
+Mateo,Garcia,mateo.garcia@example.com,Sales Rep,MX,Alexander-Smith,150,+52 55 1234 5678,https://twitter.com/mateogarcia
