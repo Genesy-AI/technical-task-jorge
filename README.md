@@ -62,7 +62,7 @@ export ANTHROPIC_API_KEY="your-provided-key"
 ```zsh
 cd backend
 nvm use                   # Ensure the Node version from .nvmrc
-pnpm install              # Install dependencies
+pnpm install              # Install dependencies (also creates .env from .env.sample)
 pnpm migrate:dev          # Sync local SQLite with Prisma schema
 pnpm gen:prisma           # Generate Prisma client
 temporal server start-dev # Starts Temporal server
